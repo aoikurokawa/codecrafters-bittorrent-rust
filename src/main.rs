@@ -1,13 +1,13 @@
 mod hashes;
 
-use std::{fs::File, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use hashes::Hashes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_bencode;
-use serde_json;
+use sha1::{Digest, Sha1};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -33,7 +33,7 @@ struct Torrent {
     info: Info,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Info {
     /// The suggested name to save the file (or directory) as. It is purely advisory.
     name: String,
@@ -55,7 +55,7 @@ struct Info {
 }
 
 /// There is a key `length` or a key `files`, but not both or neither.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 enum Keys {
     /// If `length` is present then the download represents a signle file.
@@ -73,12 +73,12 @@ enum Keys {
     /// file by concatenating the files in the order they appear in the files list.
     MultiFile {
         /// The files list is the value files maps to, and is a list of dictionaries containing the following keys:
-        files: Vec<TorrentFile>,
+        files: Vec<File>,
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct TorrentFile {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct File {
     /// The length of the file, in bytes
     length: usize,
 
@@ -108,6 +108,14 @@ fn main() -> anyhow::Result<()> {
             } else {
                 todo!();
             }
+
+            let info_encoded =
+                serde_bencode::to_bytes(&t.info).context("re-encode info session")?;
+            let mut hasher = Sha1::new();
+            hasher.update(&info_encoded);
+            let info_hash = hasher.finalize();
+
+            println!("Info Hash: {}", hex::encode(info_hash));
         }
     }
 
