@@ -1,15 +1,35 @@
-use std::env;
+mod hashes;
 
+use std::{fs::File, path::PathBuf};
+
+use anyhow::Context;
+use clap::{Parser, Subcommand};
+use hashes::Hashes;
 use serde::Deserialize;
 use serde_bencode;
 use serde_json;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Decode { value: String },
+    Info { torrent: PathBuf },
+}
 
 /// A Metainfo file (also known as .torrent files).
 #[derive(Debug, Clone, Deserialize)]
 struct Torrent {
     /// The URL of the tracker.
-    announce: reqwest::Url,
+    announce: String,
 
+    /// This maps to a dictionary, with keys described below.
     info: Info,
 }
 
@@ -20,34 +40,76 @@ struct Info {
 
     /// The number of bytes in each piece the file is split into.
     ///
-    ///
+    /// For the purpose of transfer, files are split into fixed-size pieces which are all the same
+    /// length excet for possibly the last one which may be truncated. piece length is almost
+    /// always a power of two, most commonly 2^18 = 256K (BitTorrent prior to version 3.2 uses 2^20
+    /// = 1M as default).
     #[serde(rename = "piece length")]
     plength: usize,
 
-    /// pieces maps to a string whose length is a multiple of 20. It is to be subdivided into
-    /// strings of length 20.
-    pieces: Vec<u8>,
+    /// Each entry of `pieces` is the SHA1 hash of the piece at the corresponding index.
+    pieces: Hashes,
 
+    #[serde(flatten)]
     keys: Keys,
 }
 
+/// There is a key `length` or a key `files`, but not both or neither.
 #[derive(Debug, Clone, Deserialize)]
-struct Keys {}
+#[serde(untagged)]
+enum Keys {
+    /// If `length` is present then the download represents a signle file.
+    ///
+    /// In the single file case, the name key is the name of a file, in the multiple file case,
+    /// it's the name of a directory.
+    SingleFile {
+        /// The length of the file in bytes.
+        length: usize,
+    },
+
+    /// Otherwise it represents a set of files which go in a directory structure.
+    ///
+    /// For the purpose of the other keys in `Info`, the multi-file case is treated as only having a single
+    /// file by concatenating the files in the order they appear in the files list.
+    MultiFile {
+        /// The files list is the value files maps to, and is a list of dictionaries containing the following keys:
+        files: Vec<TorrentFile>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TorrentFile {
+    /// The length of the file, in bytes
+    length: usize,
+
+    /// Subdirectory names for this file, the last of which is the actual file name
+    /// (a zero length list is an error case).
+    path: Vec<String>,
+}
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let command = &args[1];
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
 
-    if command == "decode" {
-        // You can use print statements as follows for debugging, they'll be visible when running tests.
-        eprintln!("Logs from your program will appear here!");
+    match args.command {
+        Command::Decode { value } => {
+            // let v: serde_json::Value = serde_bencode::from_str(&value).unwrap();
+            // println!("{}", v);
+            unimplemented!("serde_bencode -> serde_json::Value is borked");
+        }
+        Command::Info { torrent } => {
+            let mut dot_torrent = std::fs::read(torrent).context("open torrent file")?;
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
-        // Uncomment this block to pass the first stage
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.0.to_string());
-    } else {
-        eprintln!("unknown command: {}", args[1])
+            println!("Tracker URL: {}", t.announce);
+            if let Keys::SingleFile { length } = t.info.keys {
+                println!("Length: {}", length);
+            } else {
+                todo!();
+            }
+        }
     }
+
+    Ok(())
 }
