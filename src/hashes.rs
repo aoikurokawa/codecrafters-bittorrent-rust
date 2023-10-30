@@ -7,7 +7,7 @@ use serde::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Hashes(Vec<[u8; 20]>);
+pub struct Hashes(pub Vec<[u8; 20]>);
 struct HashesVisitor;
 
 impl<'de> Visitor<'de> for HashesVisitor {
