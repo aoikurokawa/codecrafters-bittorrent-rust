@@ -1,13 +1,12 @@
-mod hashes;
-
 use std::path::PathBuf;
 
 use anyhow::Context;
+use bittorrent_starter_rust::{
+    torrent::{Keys, Torrent},
+    tracker::TrackerRequest,
+};
 use clap::{Parser, Subcommand};
-use hashes::Hashes;
-use serde::{Deserialize, Serialize};
 use serde_bencode;
-use sha1::{Digest, Sha1};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -21,74 +20,12 @@ struct Args {
 enum Command {
     Decode { value: String },
     Info { torrent: PathBuf },
-}
-
-/// A Metainfo file (also known as .torrent files).
-#[derive(Debug, Clone, Deserialize)]
-struct Torrent {
-    /// The URL of the tracker.
-    announce: String,
-
-    /// This maps to a dictionary, with keys described below.
-    info: Info,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct Info {
-    /// The suggested name to save the file (or directory) as. It is purely advisory.
-    name: String,
-
-    /// The number of bytes in each piece the file is split into.
-    ///
-    /// For the purpose of transfer, files are split into fixed-size pieces which are all the same
-    /// length excet for possibly the last one which may be truncated. piece length is almost
-    /// always a power of two, most commonly 2^18 = 256K (BitTorrent prior to version 3.2 uses 2^20
-    /// = 1M as default).
-    #[serde(rename = "piece length")]
-    plength: usize,
-
-    /// Each entry of `pieces` is the SHA1 hash of the piece at the corresponding index.
-    pieces: Hashes,
-
-    #[serde(flatten)]
-    keys: Keys,
-}
-
-/// There is a key `length` or a key `files`, but not both or neither.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-enum Keys {
-    /// If `length` is present then the download represents a signle file.
-    ///
-    /// In the single file case, the name key is the name of a file, in the multiple file case,
-    /// it's the name of a directory.
-    SingleFile {
-        /// The length of the file in bytes.
-        length: usize,
-    },
-
-    /// Otherwise it represents a set of files which go in a directory structure.
-    ///
-    /// For the purpose of the other keys in `Info`, the multi-file case is treated as only having a single
-    /// file by concatenating the files in the order they appear in the files list.
-    MultiFile {
-        /// The files list is the value files maps to, and is a list of dictionaries containing the following keys:
-        files: Vec<File>,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct File {
-    /// The length of the file, in bytes
-    length: usize,
-
-    /// Subdirectory names for this file, the last of which is the actual file name
-    /// (a zero length list is an error case).
-    path: Vec<String>,
+    Peers { torrent: PathBuf },
 }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     match args.command {
@@ -98,29 +35,55 @@ fn main() -> anyhow::Result<()> {
             unimplemented!("serde_bencode -> serde_json::Value is borked");
         }
         Command::Info { torrent } => {
-            let mut dot_torrent = std::fs::read(torrent).context("open torrent file")?;
+            let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
             let t: Torrent =
                 serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
             println!("Tracker URL: {}", t.announce);
-            if let Keys::SingleFile { length } = t.info.keys {
-                println!("Length: {}", length);
+            let length = if let Keys::SingleFile { length } = t.info.keys {
+                length
             } else {
                 todo!();
-            }
+            };
+            println!("Length: {}", length);
 
-            let info_encoded =
-                serde_bencode::to_bytes(&t.info).context("re-encode info session")?;
-            let mut hasher = Sha1::new();
-            hasher.update(&info_encoded);
-            let info_hash = hasher.finalize();
-
+            let info_hash = t.info_hash();
             println!("Info Hash: {}", hex::encode(info_hash));
             println!("Piece Hashes: {}", t.info.plength);
             println!("Piece Hashes:");
             for hash in t.info.pieces.0 {
                 println!("{}", hex::encode(hash));
             }
+        }
+        Command::Peers { torrent } => {
+            let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+
+            let length = if let Keys::SingleFile { length } = t.info.keys {
+                length
+            } else {
+                todo!();
+            };
+
+            let info_hash = t.info_hash();
+            let request = TrackerRequest {
+                info_hash,
+                peer_id: String::from("00112233445566778899"),
+                port: 6881,
+                uploaded: 0,
+                downloaded: 0,
+                left: length,
+                compact: 0,
+            };
+
+            let mut tracker_url = reqwest::Url::parse(&t.announce).context("parse url")?;
+            let url_params =
+                serde_urlencoded::to_string(&request).context("url-encode tracker parameters")?;
+            tracker_url.set_query(Some(&url_params));
+
+            let response = reqwest::get(tracker_url).await.context("fetch tracker");
+            println!("{response:?}");
         }
     }
 
