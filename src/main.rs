@@ -68,30 +68,42 @@ async fn main() -> anyhow::Result<()> {
 
             let info_hash = t.info_hash();
             let request = TrackerRequest {
-                info_hash,
                 peer_id: String::from("00112233445566778899"),
                 port: 6881,
                 uploaded: 0,
                 downloaded: 0,
                 left: length,
-                compact: 0,
+                compact: 1,
             };
 
-            let mut tracker_url = reqwest::Url::parse(&t.announce).context("parse url")?;
             let url_params =
                 serde_urlencoded::to_string(&request).context("url-encode tracker parameters")?;
-            tracker_url.set_query(Some(&url_params));
+            let tracker_url = format!(
+                "{}?{}&info_hash={}",
+                t.announce,
+                url_params,
+                &urlencode(&info_hash)
+            );
 
             let response = reqwest::get(tracker_url).await.context("query tracker")?;
             let response = response.bytes().await.context("fetch tracker response")?;
             let response: TrackerResponse =
                 serde_bencode::from_bytes(&response).context("parse tracker response")?;
 
-            for peer in response.peers.0 {
+            for peer in &response.peers.0 {
                 println!("{}:{}", peer.ip(), peer.port());
             }
         }
     }
 
     Ok(())
+}
+
+fn urlencode(t: &[u8; 20]) -> String {
+    let mut encoded = String::with_capacity(3 * t.len());
+    for &byte in t {
+        encoded.push('%');
+        encoded.push_str(&hex::encode(&[byte]));
+    }
+    encoded
 }

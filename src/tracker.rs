@@ -1,13 +1,10 @@
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::peers::Peers;
 
+/// Note: the info hash field is _not_ included.
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest {
-    /// The info hash of torrent.
-    #[serde(serialize_with = "urlencode")]
-    pub info_hash: [u8; 20],
-
     /// A unique identifier for your client.
     ///
     /// A string of length 20 that you get to pick.
@@ -41,16 +38,4 @@ pub struct TrackerResponse {
 
     /// A string, which contains list of peers that your client can connect to.
     pub peers: Peers,
-}
-
-fn urlencode<S>(t: &[u8; 20], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let mut encoded = String::with_capacity(3 * t.len());
-    for &byte in t {
-        encoded.push('%');
-        encoded.push_str(&hex::encode(&[byte]));
-    }
-    serializer.serialize_str(&encoded)
 }
