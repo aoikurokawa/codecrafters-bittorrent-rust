@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use bittorrent_starter_rust::{
     torrent::{Keys, Torrent},
-    tracker::TrackerRequest,
+    tracker::{TrackerRequest, TrackerResponse},
 };
 use clap::{Parser, Subcommand};
 use serde_bencode;
@@ -82,8 +82,14 @@ async fn main() -> anyhow::Result<()> {
                 serde_urlencoded::to_string(&request).context("url-encode tracker parameters")?;
             tracker_url.set_query(Some(&url_params));
 
-            let response = reqwest::get(tracker_url).await.context("fetch tracker");
-            println!("{response:?}");
+            let response = reqwest::get(tracker_url).await.context("query tracker")?;
+            let response = response.bytes().await.context("fetch tracker response")?;
+            let response: TrackerResponse =
+                serde_bencode::from_bytes(&response).context("parse tracker response")?;
+
+            for peer in response.peers.0 {
+                println!("{}:{}", peer.ip(), peer.port());
+            }
         }
     }
 
