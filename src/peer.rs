@@ -1,6 +1,4 @@
 use bytes::{Buf, BufMut, BytesMut};
-use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[repr(C)]
@@ -21,6 +19,88 @@ impl Handshake {
             info_hash,
             peer_id,
         }
+    }
+
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        let handshake_bytes = self as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
+
+        // Safety: Handshaek is a POD with repr(C)
+        let handshake_bytes: &mut [u8; std::mem::size_of::<Handshake>()] =
+            unsafe { &mut *handshake_bytes };
+
+        handshake_bytes
+    }
+}
+
+#[repr(C)]
+pub struct Request {
+    index: [u8; 4],
+    begin: [u8; 4],
+    length: [u8; 4],
+}
+
+impl Request {
+    pub fn new(index: u32, begin: u32, length: u32) -> Self {
+        Self {
+            index: index.to_be_bytes(),
+            begin: begin.to_be_bytes(),
+            length: length.to_be_bytes(),
+        }
+    }
+
+    pub fn index(&self) -> u32 {
+        u32::from_be_bytes(self.index)
+    }
+
+    pub fn begin(&self) -> u32 {
+        u32::from_be_bytes(self.begin)
+    }
+
+    pub fn length(&self) -> u32 {
+        u32::from_be_bytes(self.length)
+    }
+
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        let bytes = self as *mut Self as *mut [u8; std::mem::size_of::<Self>()];
+
+        // Safety: Handshaek is a POD with repr(C)
+        let bytes: &mut [u8; std::mem::size_of::<Self>()] = unsafe { &mut *bytes };
+
+        bytes
+    }
+}
+
+#[repr(C)]
+pub struct Piece<T: ?Sized = [u8]> {
+    index: [u8; 4],
+    begin: [u8; 4],
+    block: T,
+}
+
+impl Piece {
+    pub fn index(&self) -> u32 {
+        u32::from_be_bytes(self.index)
+    }
+
+    pub fn begin(&self) -> u32 {
+        u32::from_be_bytes(self.begin)
+    }
+
+    pub fn block(&self) -> &[u8] {
+        &self.block
+    }
+
+    const PIECE_LEAD: usize = std::mem::size_of::<Piece<()>>();
+    pub fn ref_from_bytes(data: &[u8]) -> Option<&Self> {
+        if data.len() < Self::PIECE_LEAD {
+            return None;
+        }
+
+        let n = data.len();
+
+        let piece = &data[..n - Self::PIECE_LEAD] as *const [u8] as *const Piece;
+
+        Some(unsafe { &*piece })
     }
 }
 
@@ -116,7 +196,11 @@ impl Decoder for MessageFramer {
                 ))
             }
         };
-        let data = src[5..4 + length - 1].to_vec();
+        let data = if src.len() > 5 {
+            src[5..4 + length].to_vec()
+        } else {
+            Vec::new()
+        };
         src.advance(4 + length);
 
         Ok(Some(Message {
