@@ -375,3 +375,39 @@ impl Encoder<Message> for MessageFramer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitfield_has() {
+        let bf = Bitfield {
+            payload: vec![0b10101010, 0b01010101],
+        };
+
+        assert!(bf.has_piece(0));
+        assert!(!bf.has_piece(1));
+        assert!(!bf.has_piece(7));
+        assert!(!bf.has_piece(8));
+        assert!(bf.has_piece(15));
+    }
+
+    #[test]
+    fn bifield_iter() {
+        let bf = Bitfield {
+            payload: vec![0b10101010, 0b01010101],
+        };
+        let mut pieces = bf.pieces();
+
+        assert_eq!(pieces.next(), Some(0));
+        assert_eq!(pieces.next(), Some(2));
+        assert_eq!(pieces.next(), Some(4));
+        assert_eq!(pieces.next(), Some(6));
+        assert_eq!(pieces.next(), Some(9));
+        assert_eq!(pieces.next(), Some(11));
+        assert_eq!(pieces.next(), Some(13));
+        assert_eq!(pieces.next(), Some(15));
+        assert_eq!(pieces.next(), None);
+    }
+}
