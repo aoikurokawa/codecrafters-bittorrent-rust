@@ -121,7 +121,7 @@ impl Bitfield {
         byte & 1_u8.rotate_right(bit_i + 1) != 0
     }
 
-    pub(crate) fn pieces(&self) -> impl Iterator<Item = usize>  + '_ {
+    pub(crate) fn pieces(&self) -> impl Iterator<Item = usize> + '_ {
         self.payload.iter().enumerate().flat_map(|(byte_i, byte)| {
             (0..u8::BITS).filter_map(move |bit_i| {
                 let piece_i = byte_i * (u8::BITS as usize) + (bit_i as usize);

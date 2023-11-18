@@ -4,7 +4,7 @@ use anyhow::Context;
 use bittorrent_starter_rust::{
     peer::{Handshake, Message, MessageFramer, MessageTag, Piece, Request},
     torrent::{Keys, Torrent},
-    tracker::{TrackerRequest, TrackerResponse, urlencode},
+    tracker::{urlencode, TrackerRequest, TrackerResponse},
 };
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
@@ -327,4 +327,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
