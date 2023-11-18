@@ -38,3 +38,4 @@ tokio-util = { version = "0.7.10", features = ["full"] }
 futures-core = "0.3"
 futures-util = { version = "0.3", features = ["sink"] }
 futures-sink = "0.3"
+fastrand = "2.0.1"

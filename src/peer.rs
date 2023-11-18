@@ -55,13 +55,15 @@ impl Peer {
 
     pub async fn download(
         &mut self,
-        piece_i: u32,
-        block_i: u32,
-        block_size: u32,
+        piece_i: usize,
+        block_i: usize,
+        block_size: usize,
     ) -> anyhow::Result<Vec<u8>> {
+        anyhow::ensure!(self.bitfield.has_piece(piece_i));
+
         let mut request = Request::new(
             piece_i as u32,
-            block_i * BLOCK_MAX as u32,
+            (block_i * BLOCK_MAX) as u32,
             block_size as u32,
         );
         let request_bytes = Vec::from(request.as_bytes_mut());
@@ -86,11 +88,15 @@ impl Peer {
         let piece = Piece::ref_from_bytes(&piece.payload[..])
             .expect("always get all Piece response fields from peer");
 
-        anyhow::ensure!(piece.index() == piece_i);
-        anyhow::ensure!(piece.begin() == block_i * BLOCK_MAX as u32);
-        anyhow::ensure!(piece.block().len() as u32 == block_size);
+        anyhow::ensure!(piece.index() as usize == piece_i);
+        anyhow::ensure!(piece.begin() as usize == block_i * BLOCK_MAX);
+        anyhow::ensure!(piece.block().len() == block_size);
 
         Ok(Vec::from(piece.block()))
+    }
+
+    pub fn has_piece(&self, piece_i: usize) -> bool {
+        self.bitfield.has_piece(piece_i)
     }
 }
 

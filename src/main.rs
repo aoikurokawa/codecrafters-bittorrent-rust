@@ -12,8 +12,6 @@ use serde_bencode;
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const BLOCK_MAX: usize = 1 << 14;
-
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
