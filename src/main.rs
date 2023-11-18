@@ -4,7 +4,7 @@ use anyhow::Context;
 use bittorrent_starter_rust::{
     peer::{Handshake, Message, MessageFramer, MessageTag, Piece, Request},
     torrent::{Keys, Torrent},
-    tracker::{TrackerRequest, TrackerResponse},
+    tracker::{TrackerRequest, TrackerResponse, urlencode},
 };
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
@@ -43,6 +43,11 @@ enum Command {
         output: PathBuf,
         torrent: PathBuf,
         piece: usize,
+    },
+    Download {
+        #[arg(short)]
+        output: PathBuf,
+        torrent: PathBuf,
     },
 }
 
@@ -308,16 +313,18 @@ async fn main() -> anyhow::Result<()> {
                 .context("writea out downloaded piece")?;
             println!("Piece {piece_i} downloaded to {}", output.display())
         }
+        Command::Download { output, torrent } => {
+            let torrent = Torrent::read(torrent).await?;
+            torrent.print_tree();
+            let files = torrent.download_all().await?;
+            tokio::fs::write(
+                output,
+                files.into_iter().next().expect("always one file").bytes(),
+            )
+            .await?;
+        }
     }
 
     Ok(())
 }
 
-fn urlencode(t: &[u8; 20]) -> String {
-    let mut encoded = String::with_capacity(3 * t.len());
-    for &byte in t {
-        encoded.push('%');
-        encoded.push_str(&hex::encode(&[byte]));
-    }
-    encoded
-}

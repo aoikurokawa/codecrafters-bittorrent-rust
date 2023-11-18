@@ -1,3 +1,4 @@
+pub mod download;
 pub mod hashes;
 pub mod peer;
 pub mod peers;

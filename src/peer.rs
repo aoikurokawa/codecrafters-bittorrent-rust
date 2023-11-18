@@ -1,5 +1,141 @@
+use std::net::SocketAddrV4;
+
+use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
-use tokio_util::codec::{Decoder, Encoder};
+use futures_util::{SinkExt, StreamExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
+use tokio_util::codec::{Decoder, Encoder, Framed};
+
+const BLOCK_MAX: usize = 1 << 14;
+
+pub(crate) struct Peer {
+    addr: SocketAddrV4,
+    stream: Framed<TcpStream, MessageFramer>,
+    bitfield: Bitfield,
+}
+
+impl Peer {
+    pub async fn new(peer_addr: SocketAddrV4, info_hash: [u8; 20]) -> anyhow::Result<Self> {
+        let mut peer = tokio::net::TcpStream::connect(peer_addr)
+            .await
+            .context("connect to peer")?;
+        let mut handshake = Handshake::new(info_hash, *b"00112233445566778899");
+        {
+            let handshake_bytes = handshake.as_bytes_mut();
+
+            peer.write_all(handshake_bytes)
+                .await
+                .context("write handshake")?;
+
+            peer.read_exact(handshake_bytes)
+                .await
+                .context("read handshake")?;
+        }
+
+        anyhow::ensure!(handshake.length == 19);
+        anyhow::ensure!(&handshake.bittorent == b"BitTorrent protocol");
+
+        let mut peer = tokio_util::codec::Framed::new(peer, MessageFramer);
+        let bitfield = peer
+            .next()
+            .await
+            .expect("peer always send a bitfield")
+            .context("peer message was invalid")?;
+        anyhow::ensure!(bitfield.tag == MessageTag::Bitfield);
+
+        Ok(Self {
+            addr: peer_addr,
+            stream: peer,
+            bitfield: Bitfield::from_payload(bitfield.payload),
+        })
+    }
+
+    pub async fn download(
+        &mut self,
+        piece_i: u32,
+        block_i: u32,
+        block_size: u32,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut request = Request::new(
+            piece_i as u32,
+            block_i * BLOCK_MAX as u32,
+            block_size as u32,
+        );
+        let request_bytes = Vec::from(request.as_bytes_mut());
+        self.stream
+            .send(Message {
+                tag: MessageTag::Request,
+                payload: request_bytes,
+            })
+            .await
+            .with_context(|| format!("send request for block {block_i}"))?;
+
+        let piece = &self
+            .stream
+            .next()
+            .await
+            .expect("peer always send a piece")
+            .context("peer message was invalid")?;
+
+        anyhow::ensure!(piece.tag == MessageTag::Piece);
+        anyhow::ensure!(!piece.payload.is_empty());
+
+        let piece = Piece::ref_from_bytes(&piece.payload[..])
+            .expect("always get all Piece response fields from peer");
+
+        anyhow::ensure!(piece.index() == piece_i);
+        anyhow::ensure!(piece.begin() == block_i * BLOCK_MAX as u32);
+        anyhow::ensure!(piece.block().len() as u32 == block_size);
+
+        Ok(Vec::from(piece.block()))
+    }
+}
+
+pub struct Bitfield {
+    payload: Vec<u8>,
+}
+
+impl Bitfield {
+    pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
+        let byte_i = piece_i / (u8::BITS as usize);
+        let bit_i = (piece_i % (u8::BITS as usize)) as u32;
+        let Some(&byte) = self.payload.get(byte_i) else {
+            return false;
+        };
+
+        // 01010101
+        //
+        // nth bit is set
+        //
+        // 1 << n
+        //
+        // 01010101
+        // &
+        // 00001000
+        // 00000000
+        //
+        // 10000000
+        byte & 1_u8.rotate_right(bit_i + 1) != 0
+    }
+
+    pub(crate) fn pieces(&self) -> impl Iterator<Item = usize>  + '_ {
+        self.payload.iter().enumerate().flat_map(|(byte_i, byte)| {
+            (0..u8::BITS).filter_map(move |bit_i| {
+                let piece_i = byte_i * (u8::BITS as usize) + (bit_i as usize);
+                let mask = 1u8.rotate_right(bit_i + 1); // == 128
+
+                (byte & mask != 0).then_some(piece_i)
+            })
+        })
+    }
+
+    fn from_payload(payload: Vec<u8>) -> Self {
+        Self { payload }
+    }
+}
 
 #[repr(C)]
 pub struct Handshake {
