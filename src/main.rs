@@ -58,6 +58,9 @@ fn decode_bencode_value(encoded_value: &str) -> (serde_json::Value, &str) {
     panic!("Unhandled encoded value: {}", encoded_value);
 }
 
+struct Torrent {
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
