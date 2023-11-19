@@ -124,11 +124,16 @@ pub(crate) async fn all(t: &Torrent) -> anyhow::Result<Downloaded> {
                                 .expect("always get all Piece response fields from peer");
                             bytes_received += piece.block().len();
                             all_blocks[piece.begin() as usize..][..piece.block().len()].copy_from_slice(piece.block());
+
+                            if bytes_received == piece_size {
+                                // have received every piece 
+                                // this must mean that all participations have either exited or are
+                                // waiting for more work -- in either case, it is okay to drop all the
+                                // participant futures
+                                break;
+                            }
                         } else {
-                             // have received every piece (or no peers left)
-                            // this must mean that all participations have either exited or are
-                            // waiting for more work -- in either case, it is okay to drop all the
-                            // participant futures
+                            // there are no peers left, so we can't progress!
                             break;
                         }
                     }
