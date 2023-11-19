@@ -9,12 +9,13 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-const BLOCK_MAX: usize = 1 << 14;
+use crate::BLOCK_MAX;
 
 pub(crate) struct Peer {
     addr: SocketAddrV4,
     stream: Framed<TcpStream, MessageFramer>,
     bitfield: Bitfield,
+    choked: bool,
 }
 
 impl Peer {
@@ -50,53 +51,151 @@ impl Peer {
             addr: peer_addr,
             stream: peer,
             bitfield: Bitfield::from_payload(bitfield.payload),
+            choked: true,
         })
     }
 
-    pub async fn download(
-        &mut self,
-        piece_i: usize,
-        block_i: usize,
-        block_size: usize,
-    ) -> anyhow::Result<Vec<u8>> {
-        anyhow::ensure!(self.bitfield.has_piece(piece_i));
-
-        let mut request = Request::new(
-            piece_i as u32,
-            (block_i * BLOCK_MAX) as u32,
-            block_size as u32,
-        );
-        let request_bytes = Vec::from(request.as_bytes_mut());
-        self.stream
-            .send(Message {
-                tag: MessageTag::Request,
-                payload: request_bytes,
-            })
-            .await
-            .with_context(|| format!("send request for block {block_i}"))?;
-
-        let piece = &self
-            .stream
-            .next()
-            .await
-            .expect("peer always send a piece")
-            .context("peer message was invalid")?;
-
-        anyhow::ensure!(piece.tag == MessageTag::Piece);
-        anyhow::ensure!(!piece.payload.is_empty());
-
-        let piece = Piece::ref_from_bytes(&piece.payload[..])
-            .expect("always get all Piece response fields from peer");
-
-        anyhow::ensure!(piece.index() as usize == piece_i);
-        anyhow::ensure!(piece.begin() as usize == block_i * BLOCK_MAX);
-        anyhow::ensure!(piece.block().len() == block_size);
-
-        Ok(Vec::from(piece.block()))
+    pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
+        self.bitfield.has_piece(piece_i)
     }
 
-    pub fn has_piece(&self, piece_i: usize) -> bool {
-        self.bitfield.has_piece(piece_i)
+    pub(crate) async fn participate(
+        &mut self,
+        piece_i: usize,
+        piece_size: usize,
+        nblocks: usize,
+        submit: kanal::AsyncSender<usize>,
+        tasks: kanal::AsyncReceiver<usize>,
+        finish: tokio::sync::mpsc::Sender<Message>,
+    ) -> anyhow::Result<()> {
+        self.stream
+            .send(Message {
+                tag: MessageTag::Interested,
+                payload: Vec::new(),
+            })
+            .await
+            .context("send interested message")?;
+
+        'task: loop {
+            //    while let Ok(block) = tasks.recv().await {
+            while self.choked {
+                let unchoke = self
+                    .stream
+                    .next()
+                    .await
+                    .expect("peer always sends an unchoke")
+                    .context("peer message was invalid")?;
+
+                match unchoke.tag {
+                    MessageTag::Unchoke => {
+                        self.choked = false;
+                        assert!(unchoke.payload.is_empty());
+                        break;
+                    }
+                    MessageTag::Have => {
+                        // TODO: Update bitfield
+                        // TODO: add to list of peers for relevant piece
+                    }
+                    MessageTag::Interested
+                    | MessageTag::NotInterested
+                    | MessageTag::Request
+                    | MessageTag::Cancel => {
+                        // not allowing request for now
+                    }
+                    MessageTag::Piece => {
+                        // piece that we no longer need/are reesponsible for
+                    }
+                    MessageTag::Choke => {
+                        anyhow::bail!("peer sent unchoke while unchoked");
+                    }
+                    MessageTag::Bitfield => {
+                        anyhow::bail!("peer sent bitfield after handshake has been completed");
+                    }
+                }
+            }
+            let Ok(block) = tasks.recv().await else {
+                break;
+            };
+
+            let block_size = if block == nblocks - 1 {
+                let md = piece_size % BLOCK_MAX;
+                if md == 0 {
+                    BLOCK_MAX
+                } else {
+                    md
+                }
+            } else {
+                BLOCK_MAX
+            };
+
+            let mut request = Request::new(
+                piece_i as u32,
+                (block * BLOCK_MAX) as u32,
+                block_size as u32,
+            );
+            let request_bytes = Vec::from(request.as_bytes_mut());
+            self.stream
+                .send(Message {
+                    tag: MessageTag::Request,
+                    payload: request_bytes,
+                })
+                .await
+                .with_context(|| format!("send request for block {block}"))?;
+
+            // TODO: timeout and return block to submit if timed out
+            let mut msg;
+            loop {
+                msg = self
+                    .stream
+                    .next()
+                    .await
+                    .expect("peer always send a msg")
+                    .context("peer message was invalid")?;
+
+                match msg.tag {
+                    MessageTag::Choke => {
+                        assert!(msg.payload.is_empty());
+                        self.choked = true;
+                        submit.send(block).await.expect("we still have a receiver");
+                        continue 'task;
+                    }
+                    MessageTag::Piece => {
+                        let piece = Piece::ref_from_bytes(&msg.payload[..])
+                            .expect("always get all Piece response fields from peer");
+
+                        if piece.index() as usize != piece_i
+                            || piece.begin() as usize != block * BLOCK_MAX
+                        {
+                            // piece that we no longer need/are responsible for
+                        } else {
+                            assert_eq!(piece.block().len(), block_size);
+                            break;
+                        }
+                    }
+                    MessageTag::Have => {
+                        // TODO: Update bitfield
+                        // TODO: add to list of peers for relevant msg
+                    }
+                    MessageTag::Interested
+                    | MessageTag::NotInterested
+                    | MessageTag::Request
+                    | MessageTag::Cancel => {
+                        // not allowing request for now
+                    }
+                    MessageTag::Unchoke => {
+                        anyhow::bail!("peer sent unchoke while unchoked");
+                    }
+                    MessageTag::Bitfield => {
+                        anyhow::bail!("peer sent bitfield after handshake has been completed");
+                    }
+                }
+            }
+
+            finish.send(msg).await.expect("receiver should not go away while there are active peers (us) and missing blocks (this one)");
+            //     }
+        }
+
+        Ok(())
     }
 }
 

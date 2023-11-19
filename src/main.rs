@@ -4,7 +4,7 @@ use anyhow::Context;
 use bittorrent_starter_rust::{
     peer::{Handshake, Message, MessageFramer, MessageTag, Piece, Request},
     torrent::{Keys, Torrent},
-    tracker::{urlencode, TrackerRequest, TrackerResponse},
+    tracker::{urlencode, TrackerRequest, TrackerResponse}, BLOCK_MAX,
 };
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};

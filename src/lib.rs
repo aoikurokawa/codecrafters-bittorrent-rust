@@ -1,4 +1,4 @@
-pub(crate) const BLOCK_MAX: usize = 1 << 14;
+pub const BLOCK_MAX: usize = 1 << 14;
 
 pub mod download;
 pub mod hashes;
