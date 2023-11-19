@@ -1,7 +1,12 @@
 use std::env;
 
-fn decode_bencode_value(value: &str) -> &str {
-    ""
+fn decode_bencode_value(encoded_value: &str) -> serde_json::Value {
+    if let Some((len, rest)) = encoded_value.split_once(':') {
+        if let Ok(len) = len.parse::<usize>() {
+            return serde_json::Value::String(rest[..len].to_string());
+        }
+    }
+    panic!("Unhandled encoded value: {}", encoded_value);
 }
 
 fn main() {
