@@ -187,8 +187,8 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Info { torrent } => {
             let dot_torrent = std::fs::read(torrent).context("read torrent file")?;
-            let t: Torrent = serde_bencode::from_bytes(&dot_torrent)
-                .context("parse torrent file")?;
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
             println!("Tracker URL: {}", t.announce);
 
             if let Keys::SingleFile { length } = t.info.keys {
