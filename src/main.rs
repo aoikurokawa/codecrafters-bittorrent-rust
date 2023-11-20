@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::ser::Serializer;
+use serde::{Deserialize, Deserializer, Serialize};
+use sha1::{Digest, Sha1};
 
 fn decode_bencode_value(encoded_value: &str) -> (serde_json::Value, &str) {
     match encoded_value.chars().next() {
@@ -65,7 +67,7 @@ fn decode_bencode_value(encoded_value: &str) -> (serde_json::Value, &str) {
 }
 
 /// A Metainfo files (also known as .torrent files).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Torrent {
     /// The URL of the tracker
     announce: String,
@@ -73,7 +75,7 @@ struct Torrent {
     info: Info,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Info {
     /// The suggested name to save the file (or directory) as. It is purely advisory.
     ///
@@ -98,7 +100,7 @@ struct Info {
 }
 
 /// There is also a key `length` or a key `files`, but not both or neither.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 enum Keys {
     /// If `length` is present then the download represents a single file,
@@ -117,7 +119,7 @@ enum Keys {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct File {
     /// The length of the file, in bytes
     length: usize,
@@ -163,6 +165,16 @@ impl<'de> Deserialize<'de> for Hashes {
     }
 }
 
+impl Serialize for Hashes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let single_file = self.0.concat();
+        serializer.serialize_bytes(&single_file)
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -196,6 +208,13 @@ fn main() -> anyhow::Result<()> {
             } else {
                 todo!()
             }
+
+            let info_encoded =
+                serde_bencode::to_bytes(&t.info).context("re-encode info section")?;
+            let mut hasher = Sha1::new();
+            hasher.update(&info_encoded);
+            let info_hash = hasher.finalize();
+            println!("Info Hash: {}", hex::encode(info_hash));
         }
     }
 
