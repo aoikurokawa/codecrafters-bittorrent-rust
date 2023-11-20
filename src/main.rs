@@ -209,12 +209,20 @@ fn main() -> anyhow::Result<()> {
                 todo!()
             }
 
+            // Info hash
             let info_encoded =
                 serde_bencode::to_bytes(&t.info).context("re-encode info section")?;
             let mut hasher = Sha1::new();
             hasher.update(&info_encoded);
             let info_hash = hasher.finalize();
             println!("Info Hash: {}", hex::encode(info_hash));
+
+            // Piece length and piece Hashes
+            println!("Piece Length: {}", t.info.plength);
+            println!("Piece Haashes:");
+            for piece in t.info.pieces.0 {
+                println!("{}", hex::encode(piece));
+            }
         }
     }
 
