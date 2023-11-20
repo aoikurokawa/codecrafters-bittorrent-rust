@@ -53,6 +53,10 @@ fn main() -> anyhow::Result<()> {
             for piece in t.info.pieces.0 {
                 println!("{}", hex::encode(piece));
             }
+
+            // peer_id: You can use something like 00112233445566778899.
+            // port: You can set this to 6881,
+            // For the purposes of this challenge, set this to 1.
         }
     }
 
