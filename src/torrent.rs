@@ -3,6 +3,7 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
+use sha1::{Digest, Sha1};
 
 pub fn decode_bencode_value(encoded_value: &str) -> (serde_json::Value, &str) {
     match encoded_value.chars().next() {
@@ -69,6 +70,18 @@ pub struct Torrent {
     pub announce: String,
 
     pub info: Info,
+}
+
+impl Torrent {
+    pub fn info_hash(&self) -> [u8; 20] {
+        let info_encoded = serde_bencode::to_bytes(&self.info).expect("re-encode info section");
+        let mut hasher = Sha1::new();
+        hasher.update(&info_encoded);
+        hasher
+            .finalize()
+            .try_into()
+            .expect("GenericArray<[u8; 20]>")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
