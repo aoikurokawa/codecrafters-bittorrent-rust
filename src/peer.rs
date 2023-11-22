@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[repr(C)]
 pub struct Handshake {
     pub length: u8,
