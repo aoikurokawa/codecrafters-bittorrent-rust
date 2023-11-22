@@ -100,12 +100,6 @@ async fn main() -> anyhow::Result<()> {
             let t: Torrent =
                 serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
-            let length = if let torrent::Keys::SingleFile { length } = t.info.keys {
-                length
-            } else {
-                todo!()
-            };
-
             let info_hash = t.info_hash();
 
             let peer = peer.parse::<SocketAddrV4>().context("parse peer address")?;
@@ -116,17 +110,22 @@ async fn main() -> anyhow::Result<()> {
             {
                 let handshake_bytes =
                     &mut handshake as *mut Handshake as *mut [u8; std::mem::size_of::<Handshake>()];
+                // Safety: Handshake is POD with repr(c)
                 let handshake_bytes: &mut [u8; std::mem::size_of::<Handshake>()] =
                     unsafe { &mut *handshake_bytes };
                 peer.write_all(handshake_bytes)
                     .await
                     .context("write handshake")?;
 
-                peer.read_exact(handshake_bytes).await.context("")?;
+                peer.read_exact(handshake_bytes)
+                    .await
+                    .context("read handshake")?;
             }
 
             assert_eq!(handshake.length, 19);
             assert_eq!(handshake.bittorent_protocol, *b"BitTorrent protocol");
+
+            println!("Peer ID: {}", hex::encode(handshake.peer_id));
         }
     }
 
