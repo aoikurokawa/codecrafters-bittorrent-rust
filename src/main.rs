@@ -126,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
             assert_eq!(handshake.bittorent_protocol, *b"BitTorrent protocol");
 
             println!("Peer ID: {}", hex::encode(handshake.peer_id));
+
         }
     }
 
