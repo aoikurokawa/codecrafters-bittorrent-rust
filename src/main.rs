@@ -156,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             let t: Torrent =
                 serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
-            let length = if let torrent::Keys::SingleFile { length } = t.info.keys {
+            let file_length = if let torrent::Keys::SingleFile { length } = t.info.keys {
                 length
             } else {
                 todo!()
@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
                 port: 6881,
                 uploaded: 0,
                 downloaded: 0,
-                left: length,
+                left: file_length,
                 compact: 1,
             };
             let url_params =
@@ -225,14 +225,14 @@ async fn main() -> anyhow::Result<()> {
             let unchoke = peer
                 .next()
                 .await
-                .expect("peer always sends a bitfields")
+                .expect("peer always sends a unchoke")
                 .context("peer message was invalid")?;
             assert_eq!(unchoke.tag, MessageTag::Unchoke);
             assert!(unchoke.payload.is_empty());
 
             let piece_hash = t.info.pieces.0[piece_i];
             let piece_size = if piece_i == t.info.pieces.0.len() - 1 {
-                let md = length % t.info.plength;
+                let md = file_length % t.info.plength;
                 if md == 0 {
                     t.info.plength
                 } else {
