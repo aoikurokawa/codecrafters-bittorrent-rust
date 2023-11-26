@@ -1,9 +1,13 @@
 use std::fmt;
+use std::path::Path;
 
+use anyhow::Context;
 use serde::de::{self, Visitor};
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha1::{Digest, Sha1};
+
+use crate::download::{self, Downloaded};
 
 pub fn decode_bencode_value(encoded_value: &str) -> (serde_json::Value, &str) {
     match encoded_value.chars().next() {
@@ -81,6 +85,36 @@ impl Torrent {
             .finalize()
             .try_into()
             .expect("GenericArray<[u8; 20]>")
+    }
+
+    pub async fn read(file: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let dot_torrent = tokio::fs::read(file).await.context("read torrent file")?;
+        let t = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+        Ok(t)
+    }
+
+    pub fn print_tree(&self) {
+        match &self.info.keys {
+            Keys::SingleFile { .. } => {
+                eprintln!("{}", self.info.name);
+            }
+            Keys::MultiFile { files } => {
+                for file in files {
+                    eprintln!("{:?}", file.path.join(std::path::MAIN_SEPARATOR_STR));
+                }
+            }
+        }
+    }
+
+    pub fn length(&self) -> usize {
+        match self.info.keys {
+            Keys::SingleFile { length } => length,
+            Keys::MultiFile { files } => files.iter().map(|file| file.length).sum(),
+        }
+    }
+
+    pub async fn download_all(&self) -> anyhow::Result<Downloaded> {
+        download::download_all(self).await
     }
 }
 

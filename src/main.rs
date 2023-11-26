@@ -42,6 +42,12 @@ enum Commands {
         torrent: PathBuf,
         piece: usize,
     },
+    #[clap(name = "download_piece")]
+    Download {
+        #[arg(short)]
+        output: PathBuf,
+        torrent: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -296,16 +302,19 @@ async fn main() -> anyhow::Result<()> {
                 .context("write out downloaded piece")?;
             println!("Piece {piece_i} downloaded  to {}.", output.display());
         }
+        Commands::Download { output, torrent } => {
+            let torrent: Torrent = Torrent::read(torrent).await?;
+            torrent.print_tree();
+            // torrent.download_all_to_file(output).await?;
+            let files = torrent.download_all().await?;
+            tokio::fs::write(
+                output,
+                files.iter().next().expect("always one file").bytes(),
+            )
+            .await?;
+        }
     }
 
     Ok(())
 }
 
-fn urlencode(t: &[u8; 20]) -> String {
-    let mut encoded = String::new();
-    for &byte in t {
-        encoded.push('%');
-        encoded.push_str(&hex::encode(&[byte][..]));
-    }
-    encoded
-}
