@@ -2,6 +2,7 @@ use std::{net::SocketAddrV4, path::PathBuf};
 
 use anyhow::Context;
 use bittorrent_starter_rust::{
+    download::download_all,
     peer::{Handshake, Message, MessageFramer, MessageTag, Piece, Request},
     torrent::{self, decode_bencode_value, Torrent},
     tracker::{TrackerRequest, TrackerResponse},
@@ -306,7 +307,7 @@ async fn main() -> anyhow::Result<()> {
             let torrent: Torrent = Torrent::read(torrent).await?;
             torrent.print_tree();
             // torrent.download_all_to_file(output).await?;
-            let files = torrent.download_all().await?;
+            let files = download_all(&torrent).await?;
             tokio::fs::write(
                 output,
                 files.iter().next().expect("always one file").bytes(),
@@ -317,4 +318,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
