@@ -57,6 +57,8 @@ impl Peer {
         block_i: usize,
         block_size: u32,
     ) -> anyhow::Result<Vec<u8>> {
+        anyhow::ensure!(self.bitfield.has_piece(piece_i));
+
         let mut request = Request::new(piece_i as u32, (block_i * BLOCK_MAX) as u32, block_size);
         let request_bytes = Vec::from(request.as_bytes_mut());
         self.stream
@@ -92,14 +94,28 @@ pub struct Bitfield {
 
 impl Bitfield {
     pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
-        let byte = piece_i / 8;
-        let bit = piece_i % 8;
+        let byte_i = piece_i / u8::BITS as usize;
+        let bit_i = (piece_i % (u8::BITS as usize)) as u32;
 
-        let Some(byte) = self.payload.get(byte) else {
+        let Some(byte) = self.payload.get(byte_i) else {
             return false;
         };
 
+        byte & 1u8.rotate_right((bit_i + 1) as u32) != 0
+    }
 
+    pub(crate) fn pieces(&self) -> impl Iterator<Item = usize> + '_ {
+        self.payload.iter().enumerate().flat_map(|(byte_i, byte)| {
+            (0..u8::BITS).filter_map(move |bit_i| {
+                let piece_i = byte_i * (u8::BITS as usize) + (bit_i as usize);
+                let mask = 1u8.rotate_right(bit_i + 1);
+                (byte & mask != 0).then_some(piece_i)
+            })
+        })
+    }
+
+    pub fn from_payload(payload: Vec<u8>) -> Self {
+        Self { payload }
     }
 }
 
@@ -334,4 +350,35 @@ impl Encoder<Message> for MessageFramer {
         dst.extend_from_slice(&item.payload);
         Ok(())
     }
+}
+
+#[test]
+fn bitfield_has() {
+    let bf = Bitfield {
+        payload: vec![0b10101010, 0b01010101],
+    };
+
+    assert!(bf.has_piece(0));
+    assert!(!bf.has_piece(1));
+    assert!(!bf.has_piece(7));
+    assert!(!bf.has_piece(8));
+    assert!(bf.has_piece(15));
+}
+
+#[test]
+fn bitfield_iter() {
+    let bf = Bitfield {
+        payload: vec![0b10101010, 0b01010101],
+    };
+    let mut pieces = bf.pieces();
+
+    assert_eq!(pieces.next(), Some(0)); // 0
+    assert_eq!(pieces.next(), Some(2));
+    assert_eq!(pieces.next(), Some(4));
+    assert_eq!(pieces.next(), Some(6));
+    assert_eq!(pieces.next(), Some(9));
+    assert_eq!(pieces.next(), Some(11));
+    assert_eq!(pieces.next(), Some(13));
+    assert_eq!(pieces.next(), Some(15));
+    assert_eq!(pieces.next(), None);
 }

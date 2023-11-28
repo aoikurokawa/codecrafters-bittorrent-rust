@@ -1,6 +1,6 @@
 use std::net::SocketAddrV4;
 
-use anyhow::Context;
+use anyhow::{Context, Ok};
 
 use crate::{
     torrent::{File, Torrent},
@@ -11,6 +11,11 @@ pub(crate) async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
     let peer_info = TrackerResponse::query(t)
         .await
         .context("query tracker for peer info")?;
+
+    Ok(Downloaded {
+        bytes: todo!(),
+        files: todo!(),
+    })
 }
 
 pub async fn download_piece(
@@ -18,16 +23,9 @@ pub async fn download_piece(
     piece_hash: [u8; 20],
     piece_size: usize,
 ) {
-
 }
 
-pub async fn download_piece_block_from(
-    peer: &SocketAddrV4,
-    block_i: usize
-    block_size: usize,
-) {
-
-}
+pub async fn download_piece_block_from(peer: &SocketAddrV4, block_i: usize, block_size: usize) {}
 
 pub struct Downloaded {
     bytes: Vec<u8>,
@@ -70,7 +68,7 @@ impl<'d> Iterator for DownloadedIter<'d> {
     }
 }
 
-struct DownloadedFile<'d> {
+pub struct DownloadedFile<'d> {
     pub file: &'d File,
     pub bytes: &'d [u8],
 }

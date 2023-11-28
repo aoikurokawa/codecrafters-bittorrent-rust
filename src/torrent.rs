@@ -107,8 +107,8 @@ impl Torrent {
     }
 
     pub fn length(&self) -> usize {
-        match self.info.keys {
-            Keys::SingleFile { length } => length,
+        match &self.info.keys {
+            Keys::SingleFile { length } => *length,
             Keys::MultiFile { files } => files.iter().map(|file| file.length).sum(),
         }
     }
