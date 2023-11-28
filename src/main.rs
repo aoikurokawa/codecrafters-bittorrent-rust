@@ -12,7 +12,6 @@ use futures_util::{SinkExt, StreamExt};
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const BLOCK_MAX: usize = 1 << 14;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

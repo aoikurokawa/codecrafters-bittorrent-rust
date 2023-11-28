@@ -3,14 +3,17 @@ use std::net::SocketAddrV4;
 use anyhow::Context;
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
+use crate::BLOCK_MAX;
+
 pub(crate) struct Peer {
     addr: SocketAddrV4,
     stream: Framed<TcpStream, MessageFramer>,
+    bitfield: Bitfield,
 }
 
 impl Peer {
@@ -44,6 +47,7 @@ impl Peer {
         Ok(Self {
             addr: peer_addr,
             stream: peer,
+            bitfield: Bitfield::from_payload(bitfield.payload),
         })
     }
 
@@ -53,11 +57,7 @@ impl Peer {
         block_i: usize,
         block_size: u32,
     ) -> anyhow::Result<Vec<u8>> {
-        let mut request = Request::new(
-            piece_i as u32,
-            (block_i * BLOCK_MAX) as u32,
-            block_size,
-        );
+        let mut request = Request::new(piece_i as u32, (block_i * BLOCK_MAX) as u32, block_size);
         let request_bytes = Vec::from(request.as_bytes_mut());
         self.stream
             .send(Message {
@@ -67,7 +67,8 @@ impl Peer {
             .await
             .with_context(|| format!("send request for {block_i}"))?;
 
-        let piece = peer
+        let piece = self
+            .stream
             .next()
             .await
             .expect("peer always sends a request")
@@ -82,6 +83,23 @@ impl Peer {
         anyhow::ensure!(piece.block().len() == block_size as usize);
 
         Ok(Vec::from(piece.block()))
+    }
+}
+
+pub struct Bitfield {
+    payload: Vec<u8>,
+}
+
+impl Bitfield {
+    pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
+        let byte = piece_i / 8;
+        let bit = piece_i % 8;
+
+        let Some(byte) = self.payload.get(byte) else {
+            return false;
+        };
+
+
     }
 }
 
