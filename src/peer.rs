@@ -11,9 +11,9 @@ use tokio_util::codec::{Decoder, Encoder, Framed};
 use crate::BLOCK_MAX;
 
 pub(crate) struct Peer {
-    addr: SocketAddrV4,
-    stream: Framed<TcpStream, MessageFramer>,
-    bitfield: Bitfield,
+    pub(crate) addr: SocketAddrV4,
+    pub(crate) stream: Framed<TcpStream, MessageFramer>,
+    pub(crate) bitfield: Bitfield,
 }
 
 impl Peer {
@@ -43,6 +43,14 @@ impl Peer {
             .expect("peer always sends a bitfields")
             .context("peer message was invalid")?;
         anyhow::ensure!(bitfield.tag == MessageTag::Bitfield);
+
+        let unchoke = peer
+            .next()
+            .await
+            .expect("peer always sends a unchoke")
+            .context("peer message was invalid")?;
+        assert_eq!(unchoke.tag, MessageTag::Unchoke);
+        assert!(unchoke.payload.is_empty());
 
         Ok(Self {
             addr: peer_addr,
@@ -85,6 +93,10 @@ impl Peer {
         anyhow::ensure!(piece.block().len() == block_size as usize);
 
         Ok(Vec::from(piece.block()))
+    }
+
+    pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
+        self.bitfield.has_piece(piece_i)
     }
 }
 
