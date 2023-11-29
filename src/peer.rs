@@ -98,6 +98,51 @@ impl Peer {
     pub(crate) fn has_piece(&self, piece_i: usize) -> bool {
         self.bitfield.has_piece(piece_i)
     }
+
+    pub(crate) async fn participate(
+        &mut self,
+        submit: kanal::AsyncSender<usize>,
+        tasks: kanal::AsyncReceiver<usize>,
+    ) {
+        while let Ok(block) = tasks.recv().await {
+            let block_size = if block == nblocks - 1 {
+                let md = piece_size % BLOCK_MAX;
+                if md == 0 {
+                    BLOCK_MAX
+                } else {
+                    md
+                }
+            } else {
+                BLOCK_MAX
+            };
+            let mut request = Request::new(
+                piece_i as u32,
+                (block * BLOCK_MAX) as u32,
+                block_size as u32,
+            );
+            let request_bytes = Vec::from(request.as_bytes_mut());
+            peer.send(Message {
+                tag: MessageTag::Request,
+                payload: request_bytes,
+            })
+            .await
+            .with_context(|| format!("send request for {block}"))?;
+
+            let piece = peer
+                .next()
+                .await
+                .expect("peer always sends a request")
+                .context("peer request message was invalid")?;
+            assert_eq!(piece.tag, MessageTag::Piece);
+            assert!(!piece.payload.is_empty());
+
+            let piece = Piece::ref_from_bytes(&piece.payload[..])
+                .expect("always get all Piece response fields from peer");
+            assert_eq!(piece.index() as usize, piece_i);
+            assert_eq!(piece.begin() as usize, block * BLOCK_MAX);
+            assert_eq!(piece.block().len(), block_size);
+        }
+    }
 }
 
 pub struct Bitfield {

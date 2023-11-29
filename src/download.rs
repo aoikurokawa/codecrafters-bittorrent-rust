@@ -2,12 +2,14 @@ use std::{collections::BinaryHeap, net::SocketAddrV4};
 
 use anyhow::Context;
 use futures_util::StreamExt;
+use tokio::task::JoinSet;
 
 use crate::{
-    peer::Peer,
+    peer::{Peer, Request},
     piece::Piece,
     torrent::{File, Torrent},
     tracker::TrackerResponse,
+    BLOCK_MAX,
 };
 
 pub(crate) async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
@@ -48,6 +50,40 @@ pub(crate) async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
         } else {
             need_pieces.push(piece);
         }
+    }
+
+    assert!(no_peers.is_empty());
+
+    while let Some(piece) = need_pieces.pop() {
+        let piece_size = piece.length();
+
+        // the + (BLOCK_MAX - 1) rounds up
+        let nblocks = (piece_size + (BLOCK_MAX - 1)) / BLOCK_MAX;
+        let mut all_blocks = Vec::with_capacity(piece_size);
+        let peers = peers
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(peer_i, peer)| piece.peers().contains(&peer_i).then_some(peer))
+            .collect::<Vec<&mut Peer>>();
+
+        let (send, tasks) = kanal::bounded_async(nblocks);
+        let join_set = JoinSet::new();
+
+        for peer in peers {
+            join_set.spawn(peer.participate(submit, tasks));
+        }
+
+        for block in 0..nblocks {
+            submit.send(block).await;
+            all_blocks.extend(piece.block());
+        }
+
+        assert_eq!(all_blocks.len(), piece_size);
+
+        let mut hasher = Sha1::new();
+        hasher.update(&all_blocks);
+        let hash: [u8; 20] = hasher.finalize().try_into().expect("");
+        assert_eq!(hash, piece_hash);
     }
 
     Ok(Downloaded {

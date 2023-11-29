@@ -144,7 +144,6 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
- "fastrand",
  "futures-core",
  "futures-sink",
  "futures-util",
