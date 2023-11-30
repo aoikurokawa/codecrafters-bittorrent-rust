@@ -55,6 +55,7 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
 
     assert!(no_peers.is_empty());
 
+    let mut all_pieces = vec![0; t.length()];
     while let Some(piece) = need_pieces.pop() {
         let piece_size = piece.length();
 
@@ -126,11 +127,6 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
                         bytes_received += piece.block().len();
                     } else {
                         // have received every piece (or no peers left)
-                        if bytes_received == piece_size {
-                            // great, we got all the bytes
-                        } else {
-                            // all the peers quit on us!
-                        }
                         assert_eq!(bytes_received, piece_size);
                         // this must mean that all participation have either exited or are waiting
                         // for more work -- in either case, it is okay to drop all the participant
@@ -140,17 +136,27 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
                 }
             }
         }
+        drop(participants);
 
-        assert_eq!(all_blocks.len(), piece_size);
+        if bytes_received == piece_size {
+            // great, we got all the bytes
+        } else {
+            // we'll need to connect to more peers, and make sure that those additional peers also
+            // have this piece, and then download the piece we _didn't_ get from them.
+            // probably also stick this back onto the pices_heap
+            anyhow::bail!("no peers left to get piece {}", piece.index());
+        }
 
         let mut hasher = Sha1::new();
         hasher.update(&all_blocks);
         let hash: [u8; 20] = hasher.finalize().try_into().expect("");
         assert_eq!(hash, piece.hash());
+
+        all_pieces[piece.index() * t.info.plength..].copy_from_slice(&all_blocks);
     }
 
     Ok(Downloaded {
-        bytes: todo!(),
+        bytes: all_pieces,
         files: todo!(),
     })
 }

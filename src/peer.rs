@@ -14,6 +14,7 @@ pub(crate) struct Peer {
     pub(crate) addr: SocketAddrV4,
     pub(crate) stream: Framed<TcpStream, MessageFramer>,
     pub(crate) bitfield: Bitfield,
+    pub(crate) choked: bool,
 }
 
 impl Peer {
@@ -44,18 +45,11 @@ impl Peer {
             .context("peer message was invalid")?;
         anyhow::ensure!(bitfield.tag == MessageTag::Bitfield);
 
-        let unchoke = peer
-            .next()
-            .await
-            .expect("peer always sends a unchoke")
-            .context("peer message was invalid")?;
-        assert_eq!(unchoke.tag, MessageTag::Unchoke);
-        assert!(unchoke.payload.is_empty());
-
         Ok(Self {
             addr: peer_addr,
             stream: peer,
             bitfield: Bitfield::from_payload(bitfield.payload),
+            choked: true,
         })
     }
 
@@ -108,7 +102,55 @@ impl Peer {
         tasks: kanal::AsyncReceiver<usize>,
         finish: tokio::sync::mpsc::Sender<Message>,
     ) -> anyhow::Result<()> {
-        while let Ok(block) = tasks.recv().await {
+        self.stream
+            .send(Message {
+                tag: MessageTag::Interested,
+                payload: Vec::new(),
+            })
+            .await
+            .context("send interested message")?;
+
+        'task: loop {
+            while self.choked {
+                let unchoke = self
+                    .stream
+                    .next()
+                    .await
+                    .expect("peer always sends a unchoke")
+                    .context("peer message was invalid")?;
+
+                match unchoke.tag {
+                    MessageTag::Unchoke => {
+                        self.choked = false;
+                        assert!(unchoke.payload.is_empty());
+                        break;
+                    }
+                    MessageTag::Have => {
+                        // TODO: update bitfield
+                        // TODO: add to list of peers for relevant piece
+                    }
+                    MessageTag::Interested
+                    | MessageTag::NotInterested
+                    | MessageTag::Request
+                    | MessageTag::Cancel => {
+                        // not allowing requests for now
+                    }
+                    MessageTag::Piece => {
+                        // piece that we no longer need/are responsible for
+                    }
+                    MessageTag::Choke => {
+                        anyhow::bail!("peer sent unchoke while unchoked");
+                    }
+                    MessageTag::Bitfield => {
+                        anyhow::bail!("peer sent bitfield after handshake has been completed");
+                    }
+                }
+            }
+
+            let Ok(block) = tasks.recv().await else {
+                break;
+            };
+
             let block_size = if block == nblocks - 1 {
                 let md = piece_size % BLOCK_MAX;
                 if md == 0 {
@@ -134,24 +176,58 @@ impl Peer {
                 .with_context(|| format!("send request for {block}"))?;
 
             // TODO: timeout and return block to submit if timed out
-            let piece = self
-                .stream
-                .next()
-                .await
-                .expect("peer always sends a request")
-                .context("peer request message was invalid")?;
-            assert_eq!(piece.tag, MessageTag::Piece);
-            assert!(!piece.payload.is_empty());
+            let mut msg;
+            loop {
+                msg = self
+                    .stream
+                    .next()
+                    .await
+                    .expect("peer always sends a request")
+                    .context("peer request message was invalid")?;
 
-            {
-                let piece = Piece::ref_from_bytes(&piece.payload[..])
-                    .expect("always get all Piece response fields from peer");
-                assert_eq!(piece.index() as usize, piece_i);
-                assert_eq!(piece.begin() as usize, block * BLOCK_MAX);
-                assert_eq!(piece.block().len(), block_size);
+                match msg.tag {
+                    MessageTag::Choke => {
+                        assert!(msg.payload.is_empty());
+                        self.choked = true;
+                        submit.send(block).await.expect("we still hvave a receiver");
+                        continue 'task;
+                    }
+                    MessageTag::Piece => {
+                        let piece = Piece::ref_from_bytes(&msg.payload[..])
+                            .expect("always get all Piece response fields from peer");
+
+                        if piece.index() as usize != piece_i
+                            || piece.begin() as usize != block * BLOCK_MAX
+                        {
+                            // piece that we no longer need/are responsible for
+                        } else {
+                            assert_eq!(piece.block().len(), block_size);
+                            break;
+                        }
+                    }
+                    MessageTag::Have => {
+                        // TODO: update bitfield
+                        // TODO: add to list of peers for relevant piece
+                    }
+                    MessageTag::Interested
+                    | MessageTag::NotInterested
+                    | MessageTag::Request
+                    | MessageTag::Cancel => {
+                        // not allowing requests for now
+                    }
+                    MessageTag::Unchoke => {
+                        anyhow::bail!("peer sent unchoke while unchoked");
+                    }
+                    MessageTag::Bitfield => {
+                        anyhow::bail!("peer sent bitfield after handshake has been completed");
+                    }
+                }
             }
 
-            finish.send(piece).await;
+            finish
+                .send(msg)
+                .await
+                .expect("receiver should not go away while there are active peers (us) and missing blocks (this one)");
         }
 
         Ok(())
