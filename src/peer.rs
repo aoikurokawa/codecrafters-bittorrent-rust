@@ -101,9 +101,13 @@ impl Peer {
 
     pub(crate) async fn participate(
         &mut self,
+        piece_i: usize,
+        piece_size: usize,
+        nblocks: usize,
         submit: kanal::AsyncSender<usize>,
         tasks: kanal::AsyncReceiver<usize>,
-    ) {
+        finish: tokio::sync::mpsc::Sender<Message>,
+    ) -> anyhow::Result<()> {
         while let Ok(block) = tasks.recv().await {
             let block_size = if block == nblocks - 1 {
                 let md = piece_size % BLOCK_MAX;
@@ -121,14 +125,17 @@ impl Peer {
                 block_size as u32,
             );
             let request_bytes = Vec::from(request.as_bytes_mut());
-            peer.send(Message {
-                tag: MessageTag::Request,
-                payload: request_bytes,
-            })
-            .await
-            .with_context(|| format!("send request for {block}"))?;
+            self.stream
+                .send(Message {
+                    tag: MessageTag::Request,
+                    payload: request_bytes,
+                })
+                .await
+                .with_context(|| format!("send request for {block}"))?;
 
-            let piece = peer
+            // TODO: timeout and return block to submit if timed out
+            let piece = self
+                .stream
                 .next()
                 .await
                 .expect("peer always sends a request")
@@ -136,12 +143,18 @@ impl Peer {
             assert_eq!(piece.tag, MessageTag::Piece);
             assert!(!piece.payload.is_empty());
 
-            let piece = Piece::ref_from_bytes(&piece.payload[..])
-                .expect("always get all Piece response fields from peer");
-            assert_eq!(piece.index() as usize, piece_i);
-            assert_eq!(piece.begin() as usize, block * BLOCK_MAX);
-            assert_eq!(piece.block().len(), block_size);
+            {
+                let piece = Piece::ref_from_bytes(&piece.payload[..])
+                    .expect("always get all Piece response fields from peer");
+                assert_eq!(piece.index() as usize, piece_i);
+                assert_eq!(piece.begin() as usize, block * BLOCK_MAX);
+                assert_eq!(piece.block().len(), block_size);
+            }
+
+            finish.send(piece).await;
         }
+
+        Ok(())
     }
 }
 

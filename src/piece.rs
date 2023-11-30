@@ -61,6 +61,14 @@ impl Piece {
         &self.peers
     }
 
+    pub(crate) fn index(&self) -> usize {
+        self.piece_i
+    }
+
+    pub(crate) fn hash(&self) -> [u8; 20] {
+        self.hash
+    }
+
     pub(crate) fn length(&self) -> usize {
         self.length
     }
