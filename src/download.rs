@@ -129,6 +129,7 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
                             // this must mean that all participation have either exited or are waiting
                             // for more work -- in either case, it is okay to drop all the participant
                             // futures.
+                            break;
                         }
                     } else {
                         // there are no peers left, so we can't progress!
