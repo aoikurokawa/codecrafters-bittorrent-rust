@@ -73,7 +73,7 @@ impl TrackerResponse {
     }
 }
 
-fn urlencode(t: &[u8; 20]) -> String {
+pub fn urlencode(t: &[u8; 20]) -> String {
     let mut encoded = String::new();
     for &byte in t {
         encoded.push('%');

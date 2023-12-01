@@ -3,12 +3,11 @@ use std::{collections::BinaryHeap, net::SocketAddrV4};
 use anyhow::Context;
 use futures_util::StreamExt;
 use sha1::{Digest, Sha1};
-use tokio::task::JoinSet;
 
 use crate::{
     peer::{Peer, Request},
     piece::Piece,
-    torrent::{File, Torrent},
+    torrent::{File, Keys, Torrent},
     tracker::TrackerResponse,
     BLOCK_MAX,
 };
@@ -157,18 +156,15 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
 
     Ok(Downloaded {
         bytes: all_pieces,
-        files: todo!(),
+        files: match &t.info.keys {
+            Keys::SingleFile { length } => vec![File {
+                length: *length,
+                path: vec![t.info.name.clone()],
+            }],
+            Keys::MultiFile { files } => files.clone(),
+        },
     })
 }
-
-pub async fn download_piece(
-    candiate_peers: &[SocketAddrV4],
-    piece_hash: [u8; 20],
-    piece_size: usize,
-) {
-}
-
-pub async fn download_piece_block_from(peer: &SocketAddrV4, block_i: usize, block_size: usize) {}
 
 pub struct Downloaded {
     bytes: Vec<u8>,

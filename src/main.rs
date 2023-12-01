@@ -5,13 +5,13 @@ use bittorrent_starter_rust::{
     download::download_all,
     peer::{Handshake, Message, MessageFramer, MessageTag, Piece, Request},
     torrent::{self, decode_bencode_value, Torrent},
-    tracker::{TrackerRequest, TrackerResponse}, BLOCK_MAX,
+    tracker::{urlencode, TrackerRequest, TrackerResponse},
+    BLOCK_MAX,
 };
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -309,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
             let files = download_all(&torrent).await?;
             tokio::fs::write(
                 output,
-                files.iter().next().expect("always one file").bytes(),
+                files.into_iter().next().expect("always one file").bytes(),
             )
             .await?;
         }
