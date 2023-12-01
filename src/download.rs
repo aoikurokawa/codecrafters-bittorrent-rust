@@ -52,8 +52,12 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
         }
     }
 
+    // TODO:
     assert!(no_peers.is_empty());
 
+    // TODO: this is dumb because all the pieces for a given torrent may not fit in memory!
+    // should probably write every piece to disk so that we can also resume downloads, and seed
+    // later on.
     let mut all_pieces = vec![0; t.length()];
     while let Some(piece) = need_pieces.pop() {
         let piece_size = piece.length();
@@ -90,6 +94,8 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
         drop(finish);
         drop(tasks);
 
+        // TODO: this is dumb. at the very least, use bytes::Bytes to avoid the single large
+        // allocation and having to memcpy into it.
         let mut all_blocks = vec![0u8; piece_size];
         let mut bytes_received = 0;
         loop {

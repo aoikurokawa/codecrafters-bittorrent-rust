@@ -10,6 +10,8 @@ use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::BLOCK_MAX;
 
+// TODO: ideally, Peer should keep track of what pieces we have downloaded (and references to them)
+// so that we can respond to Requests from the other side, also, choking/unchoking the other side.
 pub(crate) struct Peer {
     pub(crate) addr: SocketAddrV4,
     pub(crate) stream: Framed<TcpStream, MessageFramer>,
@@ -110,6 +112,7 @@ impl Peer {
             .await
             .context("send interested message")?;
 
+        // TODO: timeout, error, and return block to submit if .next() timed out
         'task: loop {
             while self.choked {
                 let unchoke = self
@@ -175,7 +178,6 @@ impl Peer {
                 .await
                 .with_context(|| format!("send request for {block}"))?;
 
-            // TODO: timeout and return block to submit if timed out
             let mut msg;
             loop {
                 msg = self
