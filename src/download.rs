@@ -1,4 +1,4 @@
-use std::{collections::BinaryHeap};
+use std::collections::BinaryHeap;
 
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -122,14 +122,16 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
                     // keep track of the bytes in message
                         let piece = crate::peer::Piece::ref_from_bytes(&piece.payload[..])
                             .expect("always get all Piece response fields from peer");
-                        all_blocks[piece.begin() as usize..].copy_from_slice(piece.block());
+                        all_blocks[piece.begin() as usize..][..piece.block().len()].copy_from_slice(piece.block());
                         bytes_received += piece.block().len();
+                        if bytes_received == piece_size {
+                            // have received every piece
+                            // this must mean that all participation have either exited or are waiting
+                            // for more work -- in either case, it is okay to drop all the participant
+                            // futures.
+                        }
                     } else {
-                        // have received every piece (or no peers left)
-                        assert_eq!(bytes_received, piece_size);
-                        // this must mean that all participation have either exited or are waiting
-                        // for more work -- in either case, it is okay to drop all the participant
-                        // futures.
+                        // there are no peers left, so we can't progress!
                         break;
                     }
                 }
@@ -151,7 +153,7 @@ pub async fn download_all(t: &Torrent) -> anyhow::Result<Downloaded> {
         let hash: [u8; 20] = hasher.finalize().try_into().expect("");
         assert_eq!(hash, piece.hash());
 
-        all_pieces[piece.index() * t.info.plength..].copy_from_slice(&all_blocks);
+        all_pieces[piece.index() * t.info.plength..][..piece_size].copy_from_slice(&all_blocks);
     }
 
     Ok(Downloaded {
