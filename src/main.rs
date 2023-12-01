@@ -42,7 +42,6 @@ enum Commands {
         torrent: PathBuf,
         piece: usize,
     },
-    #[clap(name = "download_piece")]
     Download {
         #[arg(short)]
         output: PathBuf,

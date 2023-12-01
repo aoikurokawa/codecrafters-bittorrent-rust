@@ -1,11 +1,11 @@
-use std::{collections::BinaryHeap, net::SocketAddrV4};
+use std::{collections::BinaryHeap};
 
 use anyhow::Context;
 use futures_util::StreamExt;
 use sha1::{Digest, Sha1};
 
 use crate::{
-    peer::{Peer, Request},
+    peer::Peer,
     piece::Piece,
     torrent::{File, Keys, Torrent},
     tracker::TrackerResponse,
